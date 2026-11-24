@@ -5,9 +5,14 @@ import {
   BOUNDS,
   CANDLES,
   EXIT_ZONE,
+  FLOOR_RISE,
   PLAYER,
   SPAWNS,
+  STAIR,
   doorToRect,
+  floorSolids,
+  inStair,
+  stairT,
   staticSolids,
   swungDoorRect,
 } from './layout'
@@ -30,6 +35,8 @@ const RADIUS = 0.3
 const GHOST_SPEED = 2.35
 const GHOST_RADIUS = 0.32
 const LOOK = 0.00215
+const TOUCH_YAW = 6.8
+const TOUCH_PITCH = 3.2
 const BLOW_LEVEL = 1.6
 const INTERACT = 1.5
 const CATCH = 0.82
@@ -68,7 +75,7 @@ export class Game {
   private canvas!: HTMLCanvasElement
   private audio = new AudioBus()
   private mic = new MicMeter()
-  private grid: Grid | null = null
+  private grids: [Grid | null, Grid | null] = [null, null]
   private navSig = ''
   private solidsCache: Rect[] = []
   private mode: Mode = 'menu'
@@ -79,6 +86,9 @@ export class Game {
   private reduced = false
   private playerX = PLAYER.x
   private playerZ = PLAYER.z
+  private playerRise = 0
+  private ghostRise = 0
+  private spawnFloor: 0 | 1 = 0
   private yaw = 0
   private pitch = 0
   private bob = 0
@@ -245,14 +255,13 @@ export class Game {
   private updatePlay(dt: number, time: number) {
     this.applyLights()
     this.mic.update()
-    const solids = this.currentSolids()
-    this.solidsCache = solids
-    this.ensureGrid(solids)
+    this.ensureGrids()
     this.applyLook()
-    this.movePlayer(dt, solids)
+    this.movePlayer(dt, this.solidsFor(this.floorOf(this.playerRise)))
+    this.solidsCache = this.solidsFor(this.floorOf(this.playerRise))
     this.consumeActions()
-    this.updateFlyingWards(dt, solids)
-    this.updateGhost(dt, solids)
+    this.updateFlyingWards(dt)
+    this.updateGhost(dt)
     this.resolveCandles()
     this.updateExit()
     this.animateDoors(dt)
@@ -264,7 +273,13 @@ export class Game {
     this.updateTension()
     if (this.mode !== 'play') return
     const dist = Math.hypot(this.ghostX - this.playerX, this.ghostZ - this.playerZ)
-    if (this.grace <= 0 && dist < CATCH && !segmentBlocked(this.playerX, this.playerZ, this.ghostX, this.ghostZ, solids)) {
+    const stacked = Math.abs(this.playerRise - this.ghostRise) < 0.38
+    if (
+      this.grace <= 0 &&
+      stacked &&
+      dist < CATCH &&
+      !segmentBlocked(this.playerX, this.playerZ, this.ghostX, this.ghostZ, this.solidsCache)
+    ) {
       this.finish('lose')
       return
     }
@@ -325,7 +340,8 @@ export class Game {
       this.bob += dt * speed * 1.7
     }
     const dip = mag > 0 && !this.reduced ? Math.sin(this.bob) * 0.028 : 0
-    this.camera.position.set(this.playerX, EYE + dip, this.playerZ)
+    this.playerRise = this.riseAt(this.playerX, this.playerZ, this.playerRise)
+    this.camera.position.set(this.playerX, this.playerRise * FLOOR_RISE + EYE + dip, this.playerZ)
     this.camera.rotation.order = 'YXZ'
     this.camera.rotation.y = this.yaw
     this.camera.rotation.x = this.pitch
@@ -414,6 +430,7 @@ export class Game {
   private dropWard() {
     const ward = this.carried
     if (!ward) return
+    ward.floor = this.floorOf(this.playerRise)
     const sin = Math.sin(this.yaw)
     const cos = Math.cos(this.yaw)
     let x = this.playerX - sin * 0.75
@@ -428,6 +445,7 @@ export class Game {
   private throwWard() {
     const ward = this.carried
     if (!ward) return
+    ward.floor = this.floorOf(this.playerRise)
     this.camera.updateMatrixWorld()
     this.worldPoint.set(0.2, -0.12, -0.55).applyMatrix4(this.camera.matrixWorld)
     const dir = new THREE.Vector3()
@@ -456,82 +474,123 @@ export class Game {
     ward.flying = false
     ward.active = true
     ward.group.visible = true
+    const y = ward.floor * FLOOR_RISE + 0.55
     ward.x = x
-    ward.y = 0.55
+    ward.y = y
     ward.z = z
     ward.vx = 0
     ward.vy = 0
     ward.vz = 0
-    ward.group.position.set(x, 0.55, z)
+    ward.group.position.set(x, y, z)
     if (this.carried === ward) this.carried = null
   }
 
-  private updateFlyingWards(dt: number, solids: Rect[]) {
+  private updateFlyingWards(dt: number) {
     for (const ward of this.level.wards) {
       if (!ward.flying) continue
+      const solids = this.solidsFor(ward.floor)
       ward.vy -= 12 * dt
       const nx = ward.x + ward.vx * dt
       const ny = ward.y + ward.vy * dt
       const nz = ward.z + ward.vz * dt
       ward.group.rotation.x += dt * 6
       ward.group.rotation.y += dt * 4
-      if (ny <= 0.45 || circleHits(nx, nz, 0.16, solids)) {
-        const landX = circleHits(ward.x, ward.z, 0.16, solids) ? this.playerX : ward.x
-        const landZ = circleHits(ward.x, ward.z, 0.16, solids) ? this.playerZ : ward.z
-        this.releaseWard(ward, landX, landZ)
+      const floorY = ward.floor * FLOOR_RISE + 0.45
+      if (ny <= floorY || circleHits(nx, nz, 0.16, solids)) {
+        const blocked = circleHits(ward.x, ward.z, 0.16, solids)
+        this.releaseWard(ward, blocked ? this.playerX : ward.x, blocked ? this.playerZ : ward.z)
         continue
       }
       ward.x = nx
       ward.y = ny
       ward.z = nz
       ward.group.position.set(nx, ny, nz)
-      if (Math.hypot(nx - this.ghostX, nz - this.ghostZ) < 0.85 && ny < 1.8) this.banish(ward)
+      const ghostBody = this.ghostRise * FLOOR_RISE + 1.1
+      if (Math.hypot(nx - this.ghostX, nz - this.ghostZ) < 0.85 && Math.abs(ny - ghostBody) < 1.25) this.banish(ward)
     }
   }
 
-  private updateGhost(dt: number, solids: Rect[]) {
+  private updateGhost(dt: number) {
     this.ghostBob += dt
     if (this.grace > 0) this.grace -= dt
     const bob = Math.sin(this.ghostBob * 2.4) * 0.05
+    const place = () => {
+      this.ghostRise = this.riseAt(this.ghostX, this.ghostZ, this.ghostRise)
+      this.level.ghost.position.set(this.ghostX, this.ghostRise * FLOOR_RISE + bob, this.ghostZ)
+    }
+    const look = () => {
+      this.level.ghost.lookAt(this.playerX, this.playerRise * FLOOR_RISE + 1.2, this.playerZ)
+    }
     const hunting = this.lightOn && this.grace <= 0
     if (!hunting) {
-      this.level.ghost.position.set(this.ghostX, bob, this.ghostZ)
-      this.level.ghost.lookAt(this.playerX, 1.2, this.playerZ)
+      place()
+      look()
       return
     }
+    const ghostFloor = this.floorOf(this.ghostRise)
+    const goalFloor = this.retreating ? this.spawnFloor : this.floorOf(this.playerRise)
+    const goal = this.retreating
+      ? { x: this.spawnX, z: this.spawnZ }
+      : { x: this.playerX, z: this.playerZ }
+    const stairX = (STAIR.minX + STAIR.maxX) / 2
+    const stairGoal = ghostFloor === 0
+      ? { x: stairX, z: STAIR.maxZ - 0.5 }
+      : { x: stairX, z: STAIR.minZ + 0.5 }
+    const crossing = goalFloor !== ghostFloor
     const enraged = this.blown() === CANDLES.length
     const speed = this.retreating ? GHOST_SPEED * 5 : enraged ? GHOST_SPEED * 2 : GHOST_SPEED
-    this.repath -= dt
-    if (this.repath <= 0 && this.grid) {
-      const goalX = this.retreating ? this.spawnX : this.playerX
-      const goalZ = this.retreating ? this.spawnZ : this.playerZ
-      this.path = findPath(this.grid, this.ghostX, this.ghostZ, goalX, goalZ)
-      this.repath = 0.28
-    }
-    const next = this.path[0]
-    if (next) {
-      const dx = next.x - this.ghostX
-      const dz = next.z - this.ghostZ
-      const len = Math.hypot(dx, dz)
-      if (len < 0.28) this.path.shift()
-      else {
-        const step = Math.min(len, speed * dt)
-        const moved = moveCircle(this.ghostX, this.ghostZ, (dx / len) * step, (dz / len) * step, GHOST_RADIUS, solids)
-        this.ghostX = moved.x
-        this.ghostZ = moved.z
-        this.level.ghost.lookAt(next.x, 1.2, next.z)
-      }
+    const solids = this.solidsFor(ghostFloor)
+    if (crossing && inStair(this.ghostX, this.ghostZ)) {
+      const dir = goalFloor === 1 ? -1 : 1
+      const step = speed * dt
+      const moved = moveCircle(
+        this.ghostX,
+        this.ghostZ,
+        clamp(stairX - this.ghostX, -step, step),
+        dir * step,
+        GHOST_RADIUS,
+        solids,
+      )
+      this.ghostX = moved.x
+      this.ghostZ = moved.z
+      this.path = []
+      look()
     } else {
-      this.level.ghost.lookAt(this.playerX, 1.2, this.playerZ)
+      this.repath -= dt
+      if (this.repath <= 0) {
+        const grid = this.grids[ghostFloor]
+        const target = crossing ? stairGoal : goal
+        this.path = grid ? findPath(grid, this.ghostX, this.ghostZ, target.x, target.z) : []
+        this.repath = 0.28
+      }
+      const next = this.path[0]
+      if (next) {
+        const dx = next.x - this.ghostX
+        const dz = next.z - this.ghostZ
+        const len = Math.hypot(dx, dz)
+        if (len < 0.28) this.path.shift()
+        else {
+          const step = Math.min(len, speed * dt)
+          const moved = moveCircle(this.ghostX, this.ghostZ, (dx / len) * step, (dz / len) * step, GHOST_RADIUS, solids)
+          this.ghostX = moved.x
+          this.ghostZ = moved.z
+          this.level.ghost.lookAt(next.x, this.ghostRise * FLOOR_RISE + 1.2, next.z)
+        }
+      } else look()
     }
-    this.level.ghost.position.set(this.ghostX, bob, this.ghostZ)
-    if (this.retreating && Math.hypot(this.ghostX - this.spawnX, this.ghostZ - this.spawnZ) < 0.8) {
+    place()
+    if (
+      this.retreating &&
+      this.floorOf(this.ghostRise) === this.spawnFloor &&
+      Math.hypot(this.ghostX - this.spawnX, this.ghostZ - this.spawnZ) < 0.8
+    ) {
       this.retreating = false
       this.path = []
       this.repath = 0
     }
     for (const ward of this.level.wards) {
       if (!ward.active || ward.carried || ward.flying) continue
+      if (Math.abs(this.ghostRise - ward.floor) > 0.3) continue
       if (Math.hypot(ward.x - this.ghostX, ward.z - this.ghostZ) < 0.75) this.banish(ward)
     }
   }
@@ -556,7 +615,7 @@ export class Game {
       return
     }
     for (const candle of this.level.candles) {
-      if (!candle.lit && !candle.justBlown) {
+      if (!candle.lit && !candle.justBlown && Math.abs(this.ghostRise - candle.spec.floor) <= 0.25) {
         const dist = Math.hypot(candle.spec.x - this.ghostX, candle.spec.z - this.ghostZ)
         if (dist < 1.05) {
           candle.lit = true
@@ -591,7 +650,11 @@ export class Game {
   }
 
   private updateTension() {
-    const dist = Math.hypot(this.ghostX - this.playerX, this.ghostZ - this.playerZ)
+    const dist = Math.hypot(
+      this.ghostX - this.playerX,
+      this.ghostZ - this.playerZ,
+      (this.ghostRise - this.playerRise) * FLOOR_RISE,
+    )
     if (this.lightOn && !this.retreating && dist < 8) this.audio.heartbeat(clamp(1 - dist / 8, 0, 1))
     if (dist < 11) this.audio.moan(this.panToGhost())
     this.el('danger').style.opacity = this.lightOn ? String(clamp((3.2 - dist) / 3.2, 0, 0.9)) : '0'
@@ -760,8 +823,9 @@ export class Game {
     this.fog.density = playing ? 0.034 : 0.015
   }
 
-  private currentSolids(): Rect[] {
-    const solids = this.level.staticSolids.slice()
+  private solidsFor(floor: 0 | 1): Rect[] {
+    const solids = floorSolids(floor)
+    if (floor !== 0) return solids
     for (const door of this.level.doors) {
       const phase = this.doorPhase(door)
       if (phase === 'c') solids.push(doorToRect(door.spec))
@@ -770,17 +834,27 @@ export class Game {
     return solids
   }
 
+  private floorOf(rise: number): 0 | 1 {
+    return rise >= 0.5 ? 1 : 0
+  }
+
+  private riseAt(x: number, z: number, rise: number): number {
+    if (inStair(x, z)) return stairT(z)
+    return rise >= 0.5 ? 1 : 0
+  }
+
   private doorPhase(door: DoorState): 'c' | 'm' | 'o' {
     if (door.open < 0.45) return 'c'
     if (door.open > 0.8) return 'o'
     return 'm'
   }
 
-  private ensureGrid(solids: Rect[]) {
+  private ensureGrids() {
     const sig = this.level.doors.map((door) => this.doorPhase(door)).join('')
-    if (this.grid && sig === this.navSig) return
+    if (this.grids[0] && sig === this.navSig) return
     this.navSig = sig
-    this.grid = buildGrid(BOUNDS, CELL, solids, INFLATE)
+    this.grids[0] = buildGrid(BOUNDS, CELL, this.solidsFor(0), INFLATE)
+    this.grids[1] = buildGrid(BOUNDS, CELL, this.solidsFor(1), INFLATE)
     this.path = []
     this.repath = 0
   }
@@ -789,7 +863,7 @@ export class Game {
     let best: CandleState | null = null
     let bestDist = INTERACT
     for (const candle of this.level.candles) {
-      if (candle.lit !== lit) continue
+      if (candle.lit !== lit || candle.spec.floor !== this.floorOf(this.playerRise)) continue
       const dx = candle.spec.x - this.playerX
       const dz = candle.spec.z - this.playerZ
       const dist = Math.hypot(dx, dz)
@@ -802,6 +876,7 @@ export class Game {
   }
 
   private closestDoor(): DoorState | null {
+    if (this.floorOf(this.playerRise) !== 0 || inStair(this.playerX, this.playerZ)) return null
     let best: DoorState | null = null
     let bestDist = 1.65
     for (const door of this.level.doors) {
@@ -820,7 +895,7 @@ export class Game {
     let best: WardState | null = null
     let bestDist = INTERACT
     for (const ward of this.level.wards) {
-      if (!ward.active || ward.carried || ward.flying) continue
+      if (!ward.active || ward.carried || ward.flying || ward.floor !== this.floorOf(this.playerRise)) continue
       const dist = Math.hypot(ward.x - this.playerX, ward.z - this.playerZ)
       if (dist > bestDist) continue
       if (dist > 0.7 && !this.facing(ward.x - this.playerX, ward.z - this.playerZ)) continue
@@ -867,6 +942,7 @@ export class Game {
   private reset(menuGhost: boolean) {
     this.playerX = PLAYER.x
     this.playerZ = PLAYER.z
+    this.playerRise = 0
     this.yaw = 0
     this.pitch = 0
     this.bob = 0
@@ -881,7 +957,7 @@ export class Game {
     this.scareLeft = 0
     this.scare.visible = false
     this.navSig = ''
-    this.grid = null
+    this.grids = [null, null]
     for (const door of this.level.doors) {
       door.open = door.spec.startOpen ? 1 : 0
       door.target = door.open
@@ -895,14 +971,19 @@ export class Game {
         puff.mesh.visible = false
       }
     }
-    for (const ward of this.level.wards) this.releaseWard(ward, ward.homeX, ward.homeZ)
-    const spawn = menuGhost ? { x: 0, z: -3.15 } : SPAWNS[Math.floor(Math.random() * SPAWNS.length)]
+    for (const ward of this.level.wards) {
+      ward.floor = ward.homeFloor
+      this.releaseWard(ward, ward.homeX, ward.homeZ)
+    }
+    const spawn = menuGhost ? { x: 0, z: -3.15, floor: 0 as const } : SPAWNS[Math.floor(Math.random() * SPAWNS.length)]
     this.ghostX = spawn.x
     this.ghostZ = spawn.z
     this.spawnX = spawn.x
     this.spawnZ = spawn.z
+    this.spawnFloor = spawn.floor
+    this.ghostRise = menuGhost ? 0 : spawn.floor
     this.level.ghost.visible = true
-    this.level.ghost.position.set(spawn.x, 0, spawn.z)
+    this.level.ghost.position.set(spawn.x, this.ghostRise * FLOOR_RISE, spawn.z)
     this.camera.position.set(PLAYER.x, EYE, PLAYER.z)
     this.camera.rotation.set(0, 0, 0)
   }
@@ -1175,8 +1256,8 @@ export class Game {
     })
     window.addEventListener('pointermove', (event) => {
       if (event.pointerId !== this.lookPointer) return
-      this.lookX += (event.clientX - this.lookLastX) * 1.7
-      this.lookY += (event.clientY - this.lookLastY) * 1.7
+      this.lookX += (event.clientX - this.lookLastX) * TOUCH_YAW
+      this.lookY += (event.clientY - this.lookLastY) * TOUCH_PITCH
       this.lookLastX = event.clientX
       this.lookLastY = event.clientY
     })
@@ -1231,9 +1312,10 @@ function mod(value: number, length: number): number {
 }
 
 const HOW_TO = `
-<p>Blow out every candle, then leave through the front door. The ghost hunts only while your flashlight is on.</p>
+<p>Blow out every candle, upstairs and down, then leave through the front door. The ghost hunts only while your flashlight is on.</p>
 <ul>
   <li>WASD to walk, Shift to sprint, mouse to look. On a phone, drag to look and use the glass controls. Push the stick all the way to sprint.</li>
+  <li>The stairs in the hall climb to the second floor.</li>
   <li>Q toggles the flashlight. Off, and the ghost freezes. On, and it chases. Switching it on has a one-in-four chance of a face in yours.</li>
   <li>Stand at a candle and press B, or blow into the mic. L lights it again, which you do not want.</li>
   <li>The ghost relights any candle it reaches while it is moving. Once all five are out, it runs twice as fast.</li>

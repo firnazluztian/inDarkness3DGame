@@ -1,4 +1,4 @@
-import type { Rect } from './collision'
+import { clamp, type Rect } from './collision'
 
 export interface WallSeg {
   x0: number
@@ -16,6 +16,7 @@ export interface Prop {
   h: number
   mat: 'wood' | 'fabric' | 'stone' | 'metal'
   solid: boolean
+  floor: 0 | 1
 }
 
 export interface DoorSpec {
@@ -35,9 +36,14 @@ export interface CandleSpec {
   id: string
   x: number
   z: number
-  /** Height of the surface the stick sits on. */
+  /** Height of the surface the stick sits on, above that floor. */
   y: number
+  floor: 0 | 1
   birthday?: boolean
+}
+
+export interface SpawnPoint extends Marker {
+  floor: 0 | 1
 }
 
 export interface Marker {
@@ -47,8 +53,24 @@ export interface Marker {
 
 export const WALL_T = 0.22
 export const WALL_H = 2.7
+/** Walking surface of the upper floor. */
+export const FLOOR_RISE = 2.92
 
 export const BOUNDS: Rect = { minX: -10.5, maxX: 10.5, minZ: -7.5, maxZ: 8.2 }
+
+/** Hall stair. Rise goes from 0 at minZ to 1 at maxZ. */
+export const STAIR = { minX: -2.02, maxX: -0.38, minZ: 0.2, maxZ: 2.7 }
+
+/** East banister. Open at both ends so you can step on and off. */
+export const RAILING: Rect = { minX: -0.38, maxX: -0.16, minZ: 0.85, maxZ: 2.15 }
+
+export function inStair(x: number, z: number): boolean {
+  return x >= STAIR.minX && x <= STAIR.maxX && z >= STAIR.minZ && z <= STAIR.maxZ
+}
+
+export function stairT(z: number): number {
+  return clamp((STAIR.maxZ - z) / (STAIR.maxZ - STAIR.minZ), 0, 1)
+}
 
 /** Axis-aligned wall centerlines. Gaps are doorways. */
 export const WALLS: WallSeg[] = [
@@ -72,18 +94,34 @@ export const WALLS: WallSeg[] = [
 ]
 
 export const PROPS: Prop[] = [
-  { id: 'sofa', cx: -8.9, cz: 4.55, w: 1.05, d: 2.2, h: 0.72, mat: 'fabric', solid: true },
-  { id: 'coffee', cx: -6.55, cz: 4.35, w: 1.35, d: 0.8, h: 0.36, mat: 'wood', solid: true },
-  { id: 'shelf', cx: -9.28, cz: 1.2, w: 0.48, d: 1.3, h: 1.55, mat: 'wood', solid: true },
-  { id: 'bed', cx: -8.15, cz: -5.25, w: 2.35, d: 1.5, h: 0.52, mat: 'fabric', solid: true },
-  { id: 'nightstand', cx: -5.9, cz: -6.28, w: 0.52, d: 0.42, h: 0.62, mat: 'wood', solid: true },
-  { id: 'wardrobe', cx: -9.28, cz: -3.15, w: 0.5, d: 1.45, h: 1.75, mat: 'wood', solid: true },
-  { id: 'table', cx: 5.8, cz: -4.65, w: 2.7, d: 1.3, h: 0.74, mat: 'wood', solid: true },
-  { id: 'counter', cx: 9.18, cz: 3.35, w: 0.7, d: 4.8, h: 1.02, mat: 'wood', solid: true },
-  { id: 'cart', cx: 4.35, cz: 6.15, w: 1.05, d: 0.58, h: 0.82, mat: 'wood', solid: true },
-  { id: 'foyer-table', cx: -1.55, cz: 4.5, w: 0.86, d: 0.5, h: 0.58, mat: 'wood', solid: true },
-  { id: 'rug-foyer', cx: 0.1, cz: 5.35, w: 2.3, d: 2.15, h: 0.02, mat: 'fabric', solid: false },
-  { id: 'rug-living', cx: -6.7, cz: 4.5, w: 3.1, d: 2.3, h: 0.02, mat: 'fabric', solid: false },
+  { id: 'sofa', cx: -8.9, cz: 4.55, w: 1.05, d: 2.2, h: 0.72, mat: 'fabric', solid: true, floor: 0 },
+  { id: 'coffee', cx: -6.55, cz: 4.35, w: 1.35, d: 0.8, h: 0.36, mat: 'wood', solid: true, floor: 0 },
+  { id: 'armchair', cx: -9.15, cz: 6.35, w: 0.72, d: 0.72, h: 0.68, mat: 'fabric', solid: true, floor: 0 },
+  { id: 'shelf', cx: -9.28, cz: 1.2, w: 0.48, d: 1.3, h: 1.55, mat: 'wood', solid: true, floor: 0 },
+  { id: 'bed', cx: -8.15, cz: -5.25, w: 2.35, d: 1.5, h: 0.52, mat: 'fabric', solid: true, floor: 0 },
+  { id: 'nightstand', cx: -5.9, cz: -6.28, w: 0.52, d: 0.42, h: 0.62, mat: 'wood', solid: true, floor: 0 },
+  { id: 'wardrobe', cx: -9.28, cz: -3.15, w: 0.5, d: 1.45, h: 1.75, mat: 'wood', solid: true, floor: 0 },
+  { id: 'chest', cx: -3.85, cz: -6.4, w: 0.85, d: 0.42, h: 0.46, mat: 'wood', solid: true, floor: 0 },
+  { id: 'table', cx: 5.8, cz: -4.65, w: 2.7, d: 1.3, h: 0.74, mat: 'wood', solid: true, floor: 0 },
+  { id: 'sideboard', cx: 9.2, cz: -5.55, w: 0.46, d: 1.45, h: 0.78, mat: 'wood', solid: true, floor: 0 },
+  { id: 'counter', cx: 9.18, cz: 3.35, w: 0.7, d: 4.8, h: 1.02, mat: 'wood', solid: true, floor: 0 },
+  { id: 'island', cx: 6.15, cz: 5.55, w: 0.9, d: 0.7, h: 0.72, mat: 'wood', solid: true, floor: 0 },
+  { id: 'cart', cx: 4.35, cz: 6.15, w: 1.05, d: 0.58, h: 0.82, mat: 'wood', solid: true, floor: 0 },
+  { id: 'hall-table', cx: 1.45, cz: 1.05, w: 0.85, d: 0.4, h: 0.62, mat: 'wood', solid: true, floor: 0 },
+  { id: 'foyer-table', cx: -1.55, cz: 4.5, w: 0.86, d: 0.5, h: 0.58, mat: 'wood', solid: true, floor: 0 },
+  { id: 'rug-foyer', cx: 0.1, cz: 5.35, w: 2.3, d: 2.15, h: 0.02, mat: 'fabric', solid: false, floor: 0 },
+  { id: 'rug-living', cx: -6.7, cz: 4.5, w: 3.1, d: 2.3, h: 0.02, mat: 'fabric', solid: false, floor: 0 },
+  { id: 'study-desk', cx: -6.3, cz: 4.7, w: 1.45, d: 0.62, h: 0.74, mat: 'wood', solid: true, floor: 1 },
+  { id: 'study-chair', cx: -6.3, cz: 3.85, w: 0.46, d: 0.46, h: 0.46, mat: 'fabric', solid: true, floor: 1 },
+  { id: 'study-shelf', cx: -9.28, cz: 2.5, w: 0.42, d: 1.55, h: 1.65, mat: 'wood', solid: true, floor: 1 },
+  { id: 'guest-bed', cx: -7.5, cz: -5.15, w: 2.05, d: 1.35, h: 0.5, mat: 'fabric', solid: true, floor: 1 },
+  { id: 'guest-dresser', cx: -9.25, cz: -3.35, w: 0.46, d: 1.25, h: 1.02, mat: 'wood', solid: true, floor: 1 },
+  { id: 'vanity', cx: 9.15, cz: 4.4, w: 0.5, d: 1.45, h: 0.8, mat: 'wood', solid: true, floor: 1 },
+  { id: 'tub', cx: 6.6, cz: 6.15, w: 1.35, d: 0.62, h: 0.52, mat: 'metal', solid: true, floor: 1 },
+  { id: 'crib', cx: 6.4, cz: -5.15, w: 1.15, d: 0.62, h: 0.58, mat: 'wood', solid: true, floor: 1 },
+  { id: 'toy-chest', cx: 8.85, cz: -3.35, w: 0.75, d: 0.42, h: 0.42, mat: 'wood', solid: true, floor: 1 },
+  { id: 'rug-study', cx: -6.4, cz: 4.2, w: 2.4, d: 1.8, h: 0.02, mat: 'fabric', solid: false, floor: 1 },
+  { id: 'rug-nursery', cx: 6.6, cz: -4.6, w: 2.2, d: 1.6, h: 0.02, mat: 'fabric', solid: false, floor: 1 },
 ]
 
 export const DOORS: DoorSpec[] = [
@@ -97,24 +135,28 @@ export const DOORS: DoorSpec[] = [
 ]
 
 export const CANDLES: CandleSpec[] = [
-  { id: 'foyer', x: -1.55, z: 4.5, y: 0.58 },
-  { id: 'living', x: -6.45, z: 6.12, y: 0 },
-  { id: 'bedroom', x: -5.9, z: -6.28, y: 0.62 },
-  { id: 'kitchen', x: 9.15, z: 4.15, y: 1.02 },
-  { id: 'birthday', x: 5.8, z: -4.22, y: 0.74, birthday: true },
+  { id: 'foyer', x: -1.55, z: 4.5, y: 0.58, floor: 0 },
+  { id: 'living', x: -6.45, z: 6.12, y: 0, floor: 0 },
+  { id: 'bedroom', x: -5.9, z: -6.28, y: 0.62, floor: 0 },
+  { id: 'kitchen', x: 9.15, z: 4.15, y: 1.02, floor: 0 },
+  { id: 'birthday', x: 5.8, z: -4.22, y: 0.74, floor: 0, birthday: true },
+  { id: 'study', x: -6.3, z: 5.08, y: 0.74, floor: 1 },
+  { id: 'guest', x: -9.25, z: -2.62, y: 1.02, floor: 1 },
 ]
 
-export const WARDS: Marker[] = [
-  { x: 1.28, z: 5.9 },
-  { x: -4.05, z: -5.55 },
-  { x: 4.15, z: 2.35 },
+export const WARDS: SpawnPoint[] = [
+  { x: 1.28, z: 5.9, floor: 0 },
+  { x: -4.05, z: -5.55, floor: 0 },
+  { x: 4.15, z: 2.35, floor: 0 },
+  { x: 4.5, z: -2.5, floor: 1 },
 ]
 
-export const SPAWNS: Marker[] = [
-  { x: -3.75, z: -5.15 },
-  { x: 8.55, z: -6.35 },
-  { x: 6.7, z: 4.85 },
-  { x: 0, z: -5.5 },
+export const SPAWNS: SpawnPoint[] = [
+  { x: -3.75, z: -5.15, floor: 0 },
+  { x: 8.55, z: -6.35, floor: 0 },
+  { x: 6.7, z: 4.85, floor: 0 },
+  { x: 0, z: -5.5, floor: 0 },
+  { x: -4.8, z: -3.7, floor: 1 },
 ]
 
 export const PLAYER: Marker = { x: 0, z: 5.15 }
@@ -125,6 +167,11 @@ export const MARK = {
   bedroom: { x: -4.7, z: -3.55 },
   kitchen: { x: 5.6, z: 3.15 },
   dining: { x: 6.3, z: -2.9 },
+  stairBottom: { x: -1.2, z: 2.95 },
+  stairTop: { x: -1.2, z: -0.05 },
+  study: { x: -5.2, z: 2.8 },
+  guest: { x: -4.8, z: -3.7 },
+  upperHall: { x: 0.4, z: 1.3 },
 } as const
 
 /** Just inside the front door. Standing here with every candle out wins. */
@@ -194,17 +241,23 @@ export function propToRect(prop: Prop): Rect {
   }
 }
 
-export function staticSolids(): Rect[] {
+export function floorSolids(floor: 0 | 1): Rect[] {
   const solids = WALLS.map((wall) => wallToRect(wall))
   for (const prop of PROPS) {
-    if (prop.solid) solids.push(propToRect(prop))
+    if (prop.solid && prop.floor === floor) solids.push(propToRect(prop))
   }
-  solids.push(STOPPER)
+  solids.push(RAILING)
+  if (floor === 0) solids.push(STOPPER)
   return solids
 }
 
-export function allSolids(closedDoorIds: ReadonlySet<string>): Rect[] {
-  const solids = staticSolids()
+export function staticSolids(): Rect[] {
+  return floorSolids(0)
+}
+
+export function allSolids(closedDoorIds: ReadonlySet<string>, floor: 0 | 1 = 0): Rect[] {
+  const solids = floorSolids(floor)
+  if (floor !== 0) return solids
   for (const door of DOORS) {
     solids.push(closedDoorIds.has(door.id) ? doorToRect(door) : swungDoorRect(door))
   }
