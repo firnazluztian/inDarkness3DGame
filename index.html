@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#07060a" />
+    <title>Ash House</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,460;9..144,620&family=Outfit:wght@340;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%2307060a' width='32' height='32'/%3E%3Cpath d='M16 5c2 6 6 8 6 13a6 6 0 1 1-12 0c0-5 4-7 6-13z' fill='%23ff6a2c'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+      <div id="shade"></div>
+      <div id="grain"></div>
+      <div id="danger"></div>
+      <div id="flash"></div>
+      <div id="fade"></div>
+
+      <section id="menu" class="layer">
+        <div class="brand">
+          <p class="kicker">First person · One house</p>
+          <h1>Ash<br />House</h1>
+          <p class="deck">The light keeps the dark off your hands. It also tells the thing in the hall exactly where you are.</p>
+          <div class="row">
+            <button id="play" class="primary" type="button">Play</button>
+            <button id="howto" type="button">How to play</button>
+            <button id="credits" type="button">Credits</button>
+          </div>
+          <p class="fine">Mouse and keyboard. Headphones, if you have them. Enter starts.</p>
+          <p id="webgl-error" class="fine warn" hidden>WebGL is unavailable in this browser.</p>
+        </div>
+      </section>
+
+      <section id="hud" class="layer" hidden>
+        <header class="hud-top">
+          <div>
+            <p id="objective">Find 5 candle(s) to escape</p>
+            <p id="rage" hidden>The ghost is enraged. It moves twice as fast.</p>
+          </div>
+          <div class="hud-side">
+            <p id="count">0 candle(s) blown out of 5</p>
+            <p id="light-state">Flashlight on</p>
+            <button id="pause-btn" type="button">Pause</button>
+          </div>
+        </header>
+        <p id="prompt"></p>
+        <p id="toast" aria-live="polite"></p>
+        <footer class="hud-bottom">
+          <p id="mic">Loudness level: 0.00</p>
+          <p id="hold"></p>
+          <p class="keys">Q light · B blow · L light candle · E door · C ward · click throw · Esc pause · M mute</p>
+        </footer>
+        <div id="crosshair"></div>
+      </section>
+
+      <section id="pause" class="layer cover" hidden>
+        <button id="resume-scrim" class="scrim" type="button" aria-label="Resume"></button>
+        <div class="card">
+          <p class="kicker">Held</p>
+          <h2>Paused</h2>
+          <div class="stack">
+            <button id="resume" class="primary" type="button">Resume</button>
+            <button id="restart" type="button">Restart</button>
+            <button id="pause-menu" type="button">Main menu</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="end" class="layer cover" hidden>
+        <div class="card end-card">
+          <p id="end-kicker" class="kicker"></p>
+          <h2 id="end-title"></h2>
+          <button id="end-menu" class="primary" type="button">Main menu</button>
+        </div>
+      </section>
+
+      <section id="sheet" class="layer cover" hidden>
+        <div class="card sheet-card">
+          <h2 id="sheet-title"></h2>
+          <div id="sheet-body"></div>
+          <button id="sheet-close" type="button">Close</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
