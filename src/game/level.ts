@@ -3,7 +3,10 @@ import type { Rect } from './collision'
 import {
   CANDLES,
   DOORS,
+  FLOOR_RISE,
   PROPS,
+  RAILING,
+  STAIR,
   WALLS,
   WALL_H,
   WARDS,
@@ -44,6 +47,8 @@ export interface CandleState {
 export interface WardState {
   homeX: number
   homeZ: number
+  homeFloor: 0 | 1
+  floor: 0 | 1
   x: number
   y: number
   z: number
@@ -68,7 +73,7 @@ export function buildLevel(scene: THREE.Scene, materials: Materials, staticSolid
   addArchitecture(scene, materials)
   const doors = DOORS.map((spec) => makeDoor(scene, materials, spec))
   const candles = CANDLES.map((spec) => makeCandle(scene, materials, spec))
-  const wards = WARDS.map((marker) => makeWard(scene, materials, marker.x, marker.z))
+  const wards = WARDS.map((marker) => makeWard(scene, materials, marker.x, marker.z, marker.floor))
   const ghost = makeGhost(scene, materials)
   return { doors, candles, wards, ghost, staticSolids }
 }
@@ -79,30 +84,24 @@ function addArchitecture(scene: THREE.Scene, materials: Materials) {
   floor.receiveShadow = true
   scene.add(floor)
 
-  const ceiling = new THREE.Mesh(sizedBox(20.4, 0.12, 14.4), materials.stone)
-  ceiling.position.set(0, WALL_H + 0.06, 0)
-  scene.add(ceiling)
+  addWalls(scene, materials, 0)
+  addWalls(scene, materials, FLOOR_RISE)
+  addUpperFloor(scene, materials)
 
-  for (const wall of WALLS) {
-    const rect = wallToRect(wall)
-    const mesh = new THREE.Mesh(
-      sizedBox(rect.maxX - rect.minX, WALL_H, rect.maxZ - rect.minZ),
-      materials.plaster,
-    )
-    mesh.position.set((rect.minX + rect.maxX) / 2, WALL_H / 2, (rect.minZ + rect.maxZ) / 2)
-    mesh.castShadow = true
-    mesh.receiveShadow = true
-    scene.add(mesh)
-  }
+  const cap = new THREE.Mesh(sizedBox(20.4, 0.12, 14.4), materials.stone)
+  cap.position.set(0, FLOOR_RISE + WALL_H + 0.06, 0)
+  scene.add(cap)
 
   for (const prop of PROPS) {
     const mat = materials[prop.mat]
     const mesh = new THREE.Mesh(sizedBox(prop.w, prop.h, prop.d), mat)
-    mesh.position.set(prop.cx, prop.h / 2, prop.cz)
+    mesh.position.set(prop.cx, prop.floor * FLOOR_RISE + prop.h / 2, prop.cz)
     mesh.castShadow = prop.solid
     mesh.receiveShadow = true
     scene.add(mesh)
   }
+
+  addStairs(scene, materials)
 
   const yard = new THREE.Mesh(new THREE.PlaneGeometry(36, 18), materials.stone)
   yard.rotation.x = -Math.PI / 2
@@ -134,12 +133,71 @@ function addArchitecture(scene: THREE.Scene, materials: Materials) {
 
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), materials.metal)
   lamp.position.set(0, WALL_H - 0.28, 0.2)
-  scene.add(lamp)
+  const upperLamp = lamp.clone()
+  upperLamp.position.y += FLOOR_RISE
+  scene.add(lamp, upperLamp)
+}
+
+function addWalls(scene: THREE.Scene, materials: Materials, y0: number) {
+  for (const wall of WALLS) {
+    const rect = wallToRect(wall)
+    const mesh = new THREE.Mesh(
+      sizedBox(rect.maxX - rect.minX, WALL_H, rect.maxZ - rect.minZ),
+      materials.plaster,
+    )
+    mesh.position.set((rect.minX + rect.maxX) / 2, y0 + WALL_H / 2, (rect.minZ + rect.maxZ) / 2)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    scene.add(mesh)
+  }
+}
+
+function addUpperFloor(scene: THREE.Scene, materials: Materials) {
+  const slabs = [
+    { x0: -10.2, x1: -2.2, z0: -7.2, z1: 7.2 },
+    { x0: 2.2, x1: 10.2, z0: -7.2, z1: 7.2 },
+    { x0: -2.2, x1: 2.2, z0: -7.2, z1: STAIR.minZ },
+    { x0: -2.2, x1: 2.2, z0: STAIR.maxZ, z1: 7.2 },
+    { x0: STAIR.maxX, x1: 2.2, z0: STAIR.minZ, z1: STAIR.maxZ },
+    { x0: -2.2, x1: STAIR.minX, z0: STAIR.minZ, z1: STAIR.maxZ },
+  ]
+  for (const slab of slabs) {
+    const mesh = new THREE.Mesh(sizedBox(slab.x1 - slab.x0, 0.16, slab.z1 - slab.z0), materials.floor)
+    mesh.position.set((slab.x0 + slab.x1) / 2, FLOOR_RISE - 0.08, (slab.z0 + slab.z1) / 2)
+    mesh.receiveShadow = true
+    scene.add(mesh)
+  }
+}
+
+function addStairs(scene: THREE.Scene, materials: Materials) {
+  const runs = 10
+  const span = STAIR.maxZ - STAIR.minZ
+  const width = STAIR.maxX - STAIR.minX
+  for (let i = 0; i < runs; i += 1) {
+    const top = ((i + 1) / runs) * FLOOR_RISE
+    const step = new THREE.Mesh(sizedBox(width, top, span / runs), materials.wood)
+    step.position.set((STAIR.minX + STAIR.maxX) / 2, top / 2, STAIR.maxZ - ((i + 0.5) / runs) * span)
+    step.castShadow = true
+    step.receiveShadow = true
+    scene.add(step)
+  }
+  const rail = new THREE.Mesh(
+    sizedBox(RAILING.maxX - RAILING.minX, FLOOR_RISE + 0.95, RAILING.maxZ - RAILING.minZ),
+    materials.wood,
+  )
+  rail.position.set(
+    (RAILING.minX + RAILING.maxX) / 2,
+    (FLOOR_RISE + 0.95) / 2,
+    (RAILING.minZ + RAILING.maxZ) / 2,
+  )
+  rail.castShadow = true
+  rail.receiveShadow = true
+  scene.add(rail)
 }
 
 function addWindows(scene: THREE.Scene, materials: Materials) {
   const glass = materials.glass
-  const specs = [
+  const ground = [
     { x: 0, y: 1.55, z: -6.84, ry: 0, w: 1.35, h: 1.45 },
     { x: -6.2, y: 1.55, z: -6.84, ry: 0, w: 1.15, h: 1.35 },
     { x: 6.4, y: 1.55, z: -6.84, ry: 0, w: 1.15, h: 1.35 },
@@ -148,6 +206,7 @@ function addWindows(scene: THREE.Scene, materials: Materials) {
     { x: 9.84, y: 1.5, z: 4.2, ry: -Math.PI / 2, w: 1.2, h: 1.3 },
     { x: 9.84, y: 1.5, z: -4.4, ry: -Math.PI / 2, w: 1.1, h: 1.25 },
   ]
+  const specs = [...ground, ...ground.map((pane) => ({ ...pane, y: pane.y + FLOOR_RISE }))]
   for (const spec of specs) {
     const frame = new THREE.Mesh(new THREE.PlaneGeometry(spec.w + 0.16, spec.h + 0.16), materials.wood)
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(spec.w, spec.h), glass)
@@ -206,7 +265,7 @@ function makeDoor(scene: THREE.Scene, materials: Materials, spec: DoorSpec): Doo
 
 function makeCandle(scene: THREE.Scene, materials: Materials, spec: CandleSpec): CandleState {
   const group = new THREE.Group()
-  group.position.set(spec.x, spec.y, spec.z)
+  group.position.set(spec.x, spec.floor * FLOOR_RISE + spec.y, spec.z)
   let stickBase = 0
   if (spec.birthday) {
     const cake = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.34, 0.16, 18), materials.cake)
@@ -249,19 +308,22 @@ function makeCandle(scene: THREE.Scene, materials: Materials, spec: CandleSpec):
   return { spec, lit: true, justBlown: false, group, flame, glow, light, puffs }
 }
 
-function makeWard(scene: THREE.Scene, materials: Materials, x: number, z: number): WardState {
+function makeWard(scene: THREE.Scene, materials: Materials, x: number, z: number, floor: 0 | 1): WardState {
   const group = new THREE.Group()
   const barA = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.48, 0.07), materials.metal)
   const barB = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.48, 0.07), materials.metal)
   barB.rotation.z = Math.PI / 2.6
   group.add(barA, barB)
-  group.position.set(x, 0.55, z)
+  const y = floor * FLOOR_RISE + 0.55
+  group.position.set(x, y, z)
   scene.add(group)
   return {
     homeX: x,
     homeZ: z,
+    homeFloor: floor,
+    floor,
     x,
-    y: 0.55,
+    y,
     z,
     vx: 0,
     vy: 0,
