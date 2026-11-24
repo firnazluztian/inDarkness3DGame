@@ -108,12 +108,21 @@ export class Game {
   private readonly held = new Set<string>()
   private readonly actions: Action[] = []
   private menuTime = 0
+  private touch = false
+  private stickX = 0
+  private stickY = 0
+  private stickPointer = -1
+  private lookPointer = -1
+  private lookLastX = 0
+  private lookLastY = 0
 
   mount() {
     const canvas = document.getElementById('view')
     if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Missing canvas')
     this.canvas = canvas
     this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    this.touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+    if (this.touch) this.markTouch()
     try {
       this.renderer = new THREE.WebGLRenderer({
         canvas,
@@ -284,30 +293,28 @@ export class Game {
   }
 
   private movePlayer(dt: number, solids: Rect[]) {
-    let ix = 0
-    let iz = 0
     const sin = Math.sin(this.yaw)
     const cos = Math.cos(this.yaw)
-    if (this.held.has('KeyW')) {
-      ix += -sin
-      iz += -cos
+    let forward = 0
+    let strafe = 0
+    if (this.held.has('KeyW')) forward += 1
+    if (this.held.has('KeyS')) forward -= 1
+    if (this.held.has('KeyD')) strafe += 1
+    if (this.held.has('KeyA')) strafe -= 1
+    const stickMag = Math.hypot(this.stickX, this.stickY)
+    if (stickMag > 0.14) {
+      forward += -this.stickY
+      strafe += this.stickX
     }
-    if (this.held.has('KeyS')) {
-      ix += sin
-      iz += cos
-    }
-    if (this.held.has('KeyD')) {
-      ix += cos
-      iz += -sin
-    }
-    if (this.held.has('KeyA')) {
-      ix += -cos
-      iz += sin
-    }
-    const mag = Math.hypot(ix, iz)
+    const mag = Math.hypot(forward, strafe)
     if (mag > 0) {
-      const speed = this.held.has('ShiftLeft') || this.held.has('ShiftRight') ? SPRINT : WALK
-      const moved = moveCircle(this.playerX, this.playerZ, (ix / mag) * speed * dt, (iz / mag) * speed * dt, RADIUS, solids)
+      const keys = this.held.has('KeyW') || this.held.has('KeyA') || this.held.has('KeyS') || this.held.has('KeyD')
+      const sprint = this.held.has('ShiftLeft') || this.held.has('ShiftRight') || stickMag > 0.86
+      const scale = keys ? 1 : Math.min(1, stickMag)
+      const speed = (sprint ? SPRINT : WALK) * scale
+      const ix = (-sin * forward + cos * strafe) / mag
+      const iz = (-cos * forward - sin * strafe) / mag
+      const moved = moveCircle(this.playerX, this.playerZ, ix * speed * dt, iz * speed * dt, RADIUS, solids)
       this.step += Math.hypot(moved.x - this.playerX, moved.z - this.playerZ)
       this.playerX = moved.x
       this.playerZ = moved.z
@@ -678,41 +685,68 @@ export class Game {
     }
     this.el('count').textContent = `${blown} candle(s) blown out of ${total}`
     this.el('rage').hidden = blown < total
-    this.el('light-state').textContent = this.lightOn ? 'Flashlight on — it can see you' : 'Flashlight off — it is still'
+    this.el('light-state').textContent = this.touch
+      ? this.lightOn
+        ? 'Light on — it can see you'
+        : 'Light off — it is still'
+      : this.lightOn
+        ? 'Flashlight on — it can see you'
+        : 'Flashlight off — it is still'
     this.el('mic').textContent =
       this.mic.status === 'denied' ? 'Mic off — press B to blow' : `Loudness level: ${this.mic.level.toFixed(2)}`
     this.el('hold').textContent = this.carried ? 'Ward in hand' : ''
+    this.el('btn-light').classList.toggle('on', this.lightOn)
+    this.el('btn-ward').textContent = this.carried ? 'Throw' : 'Ward'
     this.el('prompt').textContent = this.prompt()
     this.el('toast').textContent = this.toastLeft > 0 ? this.toastText : ''
   }
 
   private prompt(): string {
-    if (this.carried) return 'Click to throw the ward · C to drop'
+    if (this.carried) return this.touch ? 'Throw the ward' : 'Click to throw the ward · C to drop'
     const options: { dist: number; text: string }[] = []
     const door = this.closestDoor()
     if (door) {
       const locked = door.spec.id === 'exit' && this.blown() < this.level.candles.length
       options.push({
         dist: this.doorDistance(door),
-        text: locked ? 'The exit is still locked' : door.target > 0.5 ? 'Press E to close the door' : 'Press E to open the door',
+        text: locked
+          ? 'The exit is still locked'
+          : this.touch
+            ? door.target > 0.5
+              ? 'Door — close it'
+              : 'Door — open it'
+            : door.target > 0.5
+              ? 'Press E to close the door'
+              : 'Press E to open the door',
       })
     }
     const lit = this.closestCandle(true)
     if (lit) {
       options.push({
         dist: Math.hypot(lit.spec.x - this.playerX, lit.spec.z - this.playerZ),
-        text: lit.spec.birthday ? 'Press B or blow — something is listening' : 'Press B or blow to put the flame out',
+        text: this.touch
+          ? lit.spec.birthday
+            ? 'Flame — something is listening'
+            : 'Flame — put it out'
+          : lit.spec.birthday
+            ? 'Press B or blow — something is listening'
+            : 'Press B or blow to put the flame out',
       })
     }
     const dark = this.closestCandle(false)
     if (dark) {
       options.push({
         dist: Math.hypot(dark.spec.x - this.playerX, dark.spec.z - this.playerZ),
-        text: 'Press L to light the candle',
+        text: this.touch ? 'Flame — light it again' : 'Press L to light the candle',
       })
     }
     const ward = this.closestWard()
-    if (ward) options.push({ dist: Math.hypot(ward.x - this.playerX, ward.z - this.playerZ), text: 'Press C to take the ward' })
+    if (ward) {
+      options.push({
+        dist: Math.hypot(ward.x - this.playerX, ward.z - this.playerZ),
+        text: this.touch ? 'Ward — pick it up' : 'Press C to take the ward',
+      })
+    }
     options.sort((a, b) => a.dist - b.dist)
     return options[0]?.text ?? ''
   }
@@ -877,7 +911,7 @@ export class Game {
     if (this.mode !== 'menu' || this.starting) return
     this.starting = true
     const ctx = this.audio.resume()
-    this.canvas.requestPointerLock()
+    this.lockPointer()
     void this.mic.enable(ctx)
     this.el('fade').classList.add('show')
     window.clearTimeout(this.startTimer)
@@ -893,6 +927,7 @@ export class Game {
     if (this.mode !== 'play') return
     this.held.clear()
     this.actions.length = 0
+    this.resetStick()
     this.setMode('pause')
     this.unlock()
   }
@@ -900,14 +935,15 @@ export class Game {
   private resume() {
     if (this.mode !== 'pause') return
     this.setMode('play')
-    this.canvas.requestPointerLock()
+    this.lockPointer()
   }
 
   private restart() {
     this.held.clear()
+    this.resetStick()
     this.reset(false)
     this.setMode('play')
-    if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock()
+    this.lockPointer()
   }
 
   private toMenu() {
@@ -952,7 +988,7 @@ export class Game {
     this.el('hud').hidden = mode !== 'play'
     this.el('pause').hidden = mode !== 'pause'
     this.el('end').hidden = mode !== 'end'
-    if (mode === 'pause') this.el('resume').focus()
+    if (mode === 'pause' && !this.touch) this.el('resume').focus()
   }
 
   private toast(text: string) {
@@ -1021,22 +1057,143 @@ export class Game {
       this.lookY += event.movementY
     })
     this.canvas.addEventListener('mousedown', (event) => {
-      if (this.mode !== 'play') return
+      if (this.mode !== 'play' || this.touch) return
       if (document.pointerLockElement !== this.canvas) {
-        this.canvas.requestPointerLock()
+        this.lockPointer()
         return
       }
       if (event.button === 0) this.actions.push('throw')
     })
     this.canvas.addEventListener('contextmenu', (event) => event.preventDefault())
     document.addEventListener('pointerlockchange', () => {
+      if (this.touch) return
       if (document.pointerLockElement !== this.canvas && this.mode === 'play') this.pause()
     })
+    this.bindTouch()
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.mode === 'play') this.pause()
     })
     window.addEventListener('resize', () => this.resize())
-    window.addEventListener('blur', () => this.held.clear())
+    window.visualViewport?.addEventListener('resize', () => this.resize())
+    window.visualViewport?.addEventListener('scroll', () => this.resize())
+    window.addEventListener('blur', () => {
+      this.held.clear()
+      this.resetStick()
+    })
+    window.addEventListener(
+      'touchmove',
+      (event) => {
+        if (event.cancelable) event.preventDefault()
+      },
+      { passive: false },
+    )
+  }
+
+  private markTouch() {
+    document.documentElement.classList.add('touch')
+    this.el('blurb').textContent = 'Drag to look. The glass controls walk, blow, and open doors.'
+  }
+
+  private lockPointer() {
+    if (this.touch) return
+    try {
+      const result = this.canvas.requestPointerLock()
+      void Promise.resolve(result).catch(() => {})
+    } catch {
+      // Phones reject pointer lock. Touch look does not need it.
+    }
+  }
+
+  private bindTouch() {
+    const stick = this.el('stick')
+    const knob = this.el('stick-knob')
+    const place = (event: PointerEvent) => {
+      const rect = stick.getBoundingClientRect()
+      const max = rect.width * 0.34
+      let dx = event.clientX - (rect.left + rect.width / 2)
+      let dy = event.clientY - (rect.top + rect.height / 2)
+      const len = Math.hypot(dx, dy) || 1
+      const reach = Math.min(len, max)
+      dx = (dx / len) * reach
+      dy = (dy / len) * reach
+      this.stickX = dx / max
+      this.stickY = dy / max
+      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`
+    }
+    stick.addEventListener('pointerdown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      try {
+        stick.setPointerCapture(event.pointerId)
+      } catch {
+        // The pointer can already be gone on a cancelled touch.
+      }
+      this.stickPointer = event.pointerId
+      place(event)
+    })
+    stick.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== this.stickPointer) return
+      place(event)
+    })
+    const releaseStick = (event: PointerEvent) => {
+      if (event.pointerId !== this.stickPointer) return
+      this.resetStick()
+    }
+    stick.addEventListener('pointerup', releaseStick)
+    stick.addEventListener('pointercancel', releaseStick)
+
+    const press = (run: () => void) => (event: PointerEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (this.mode !== 'play') return
+      run()
+    }
+    this.el('btn-light').addEventListener(
+      'pointerdown',
+      press(() => this.actions.push('light')),
+    )
+    this.el('btn-use').addEventListener(
+      'pointerdown',
+      press(() => this.actions.push('use')),
+    )
+    this.el('btn-blow').addEventListener(
+      'pointerdown',
+      press(() => this.actions.push(this.closestCandle(true) ? 'blow' : 'relight')),
+    )
+    this.el('btn-ward').addEventListener(
+      'pointerdown',
+      press(() => this.actions.push(this.carried ? 'throw' : 'take')),
+    )
+
+    window.addEventListener('pointerdown', (event) => {
+      if (!this.touch || this.mode !== 'play') return
+      const target = event.target
+      if (!(target instanceof Element) || target.closest('button, #stick')) return
+      this.lookPointer = event.pointerId
+      this.lookLastX = event.clientX
+      this.lookLastY = event.clientY
+    })
+    window.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== this.lookPointer) return
+      this.lookX += (event.clientX - this.lookLastX) * 1.7
+      this.lookY += (event.clientY - this.lookLastY) * 1.7
+      this.lookLastX = event.clientX
+      this.lookLastY = event.clientY
+    })
+    const releaseLook = (event: PointerEvent) => {
+      if (event.pointerId === this.lookPointer) this.lookPointer = -1
+    }
+    window.addEventListener('pointerup', releaseLook)
+    window.addEventListener('pointercancel', releaseLook)
+  }
+
+  private resetStick() {
+    this.stickX = 0
+    this.stickY = 0
+    this.stickPointer = -1
+    this.lookPointer = -1
+    const knob = document.getElementById('stick-knob')
+    if (knob) knob.style.transform = 'translate(-50%, -50%)'
   }
 
   private unlock() {
@@ -1044,11 +1201,19 @@ export class Game {
   }
 
   private resize() {
-    const width = window.innerWidth
-    const height = Math.max(1, window.innerHeight)
+    const view = window.visualViewport
+    const width = Math.round(view?.width ?? window.innerWidth)
+    const height = Math.max(1, Math.round(view?.height ?? window.innerHeight))
+    const app = document.getElementById('app')
+    if (app && view) {
+      app.style.top = `${view.offsetTop}px`
+      app.style.left = `${view.offsetLeft}px`
+      app.style.width = `${width}px`
+      app.style.height = `${height}px`
+    }
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
-    this.renderer?.setSize(width, height)
+    this.renderer?.setSize(width, height, false)
   }
 
   private el(id: string): HTMLElement {
@@ -1068,7 +1233,7 @@ function mod(value: number, length: number): number {
 const HOW_TO = `
 <p>Blow out every candle, then leave through the front door. The ghost hunts only while your flashlight is on.</p>
 <ul>
-  <li>WASD to walk, Shift to sprint, mouse to look.</li>
+  <li>WASD to walk, Shift to sprint, mouse to look. On a phone, drag to look and use the glass controls. Push the stick all the way to sprint.</li>
   <li>Q toggles the flashlight. Off, and the ghost freezes. On, and it chases. Switching it on has a one-in-four chance of a face in yours.</li>
   <li>Stand at a candle and press B, or blow into the mic. L lights it again, which you do not want.</li>
   <li>The ghost relights any candle it reaches while it is moving. Once all five are out, it runs twice as fast.</li>

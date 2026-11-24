@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#07060a" />
     <title>Ash House</title>
@@ -36,7 +36,7 @@
             <button id="howto" type="button">How to play</button>
             <button id="credits" type="button">Credits</button>
           </div>
-          <p class="fine">Mouse and keyboard. Headphones, if you have them. Enter starts.</p>
+          <p id="blurb" class="fine">Mouse and keyboard. Headphones, if you have them. Enter starts.</p>
           <p id="webgl-error" class="fine warn" hidden>WebGL is unavailable in this browser.</p>
         </div>
       </section>
@@ -61,6 +61,17 @@
           <p class="keys">Q light · B blow · L light candle · E door · C ward · click throw · Esc pause · M mute</p>
         </footer>
         <div id="crosshair"></div>
+        <div id="touch">
+          <div id="stick" class="glass" role="application" aria-label="Move">
+            <div id="stick-knob" class="glass"></div>
+          </div>
+          <div id="touch-actions">
+            <button id="btn-light" class="glass" type="button">Light</button>
+            <button id="btn-use" class="glass" type="button">Door</button>
+            <button id="btn-blow" class="glass" type="button">Flame</button>
+            <button id="btn-ward" class="glass" type="button">Ward</button>
+          </div>
+        </div>
       </section>
 
       <section id="pause" class="layer cover" hidden>

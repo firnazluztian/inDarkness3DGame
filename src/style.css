@@ -17,10 +17,16 @@
 html, body, #app {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
   user-select: none;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
+
+#app { position: fixed; inset: 0; }
 
 button, input { font: inherit; color: inherit; }
 
@@ -57,7 +63,7 @@ button.primary:hover { background: #ff8650; color: var(--ink); }
 #danger,
 #flash,
 #fade {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
 }
@@ -90,7 +96,7 @@ button.primary:hover { background: #ff8650; color: var(--ink); }
 
 #fade.show { opacity: 1; }
 
-.layer { position: fixed; inset: 0; }
+.layer { position: absolute; inset: 0; }
 
 [hidden] { display: none !important; }
 
@@ -271,10 +277,126 @@ h2 { font-size: clamp(2.6rem, 6vw, 4.4rem); line-height: 0.9; }
   #fade { transition: none; }
 }
 
+#touch { display: none; }
+
+html.touch #touch {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.glass {
+  background: rgba(244, 236, 223, 0.08);
+  border: 1px solid rgba(244, 236, 223, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+#stick {
+  pointer-events: auto;
+  position: absolute;
+  left: max(1rem, env(safe-area-inset-left));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  touch-action: none;
+}
+
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(244, 236, 223, 0.2);
+}
+
+#touch-actions {
+  position: absolute;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(2, 56px);
+  gap: 0.55rem;
+}
+
+#touch-actions button {
+  pointer-events: auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  padding: 0;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+#touch-actions button.on {
+  border-color: rgba(255, 106, 44, 0.85);
+  color: var(--ember);
+}
+
+html.touch .keys { display: none; }
+
+html.touch .hud-top,
+html.touch .hud-bottom {
+  padding-top: max(0.8rem, env(safe-area-inset-top));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+html.touch .hud-bottom { display: none; }
+
+html.touch #prompt {
+  bottom: 8.6rem;
+  max-width: min(18rem, 58vw);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
+}
+
+html.touch #pause-btn { min-height: 44px; }
+
+@media (orientation: portrait) {
+  html.touch .hud-top { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+  html.touch .hud-side { text-align: left; }
+  html.touch #stick { width: 124px; height: 124px; }
+  html.touch #prompt { bottom: 11.5rem; }
+  html.touch #objective { font-size: 1.08rem; }
+  #menu {
+    align-items: flex-end;
+    padding: max(1.2rem, env(safe-area-inset-top)) 1.2rem max(1.4rem, env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, transparent 8%, rgba(7, 6, 10, 0.86) 52%);
+  }
+  .row { flex-wrap: wrap; width: 100%; }
+  #play { min-width: 8.5rem; text-align: center; }
+  h1 { font-size: clamp(3.6rem, 18vw, 5.6rem); }
+  .deck { font-size: 1rem; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  #menu {
+    align-items: center;
+    padding: 1rem max(1.4rem, env(safe-area-inset-right)) 1rem max(1.4rem, env(safe-area-inset-left));
+    background: linear-gradient(90deg, rgba(7, 6, 10, 0.8), transparent 62%);
+  }
+  h1 { font-size: clamp(2.7rem, 24vh, 4.2rem); }
+  .deck { margin: 0.45rem 0 0.7rem; font-size: 0.92rem; }
+  .fine { margin-top: 0.55rem; }
+  html.touch #stick,
+  html.touch #touch-actions button { width: 48px; height: 48px; }
+  html.touch #stick { width: 92px; height: 92px; }
+  html.touch #stick-knob { width: 38px; height: 38px; }
+  html.touch #touch-actions { grid-template-columns: repeat(4, 48px); gap: 0.4rem; }
+  html.touch #prompt { bottom: 5.6rem; }
+}
+
 @media (max-width: 720px) {
-  #menu { align-items: flex-end; padding: 4vh 1.2rem 3rem; background: linear-gradient(180deg, transparent 10%, rgba(7, 6, 10, 0.88) 55%); }
-  .row { flex-wrap: wrap; }
-  .hud-top, .hud-bottom { flex-direction: column; }
-  .hud-side { text-align: left; }
+  .hud-top, .hud-bottom { gap: 0.6rem; }
   .keys { display: none; }
 }
